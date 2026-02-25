@@ -25,6 +25,8 @@ class VoiceChatSurface:
     def __init__(self):
         self.session_key = SESSION_KEY
         self.memory_file = MEMORY_DIR / 'shared_session.json'
+        self.memory_dir = MEMORY_DIR
+        self.memory_dir = MEMORY_DIR
         self.memory_dir.mkdir(parents=True, exist_ok=True)
         
         # Try to connect to OpenClaw's systems
