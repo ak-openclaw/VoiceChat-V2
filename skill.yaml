@@ -1,0 +1,66 @@
+name: voice-chat-v2
+version: 2.0.0
+author: ak-openclaw
+description: Voice-enabled AI chat with OpenClaw integration
+tags:
+  - voice
+  - chat
+  - ai
+  - audio
+  - stt
+  - tts
+
+requirements:
+  python: ">=3.9"
+  packages:
+    - fastapi>=0.109.0
+    - uvicorn[standard]>=0.27.0
+    - httpx>=0.26.0
+    - python-multipart>=0.0.6
+    - pydantic>=2.5.0
+    - pydantic-settings>=2.1.0
+    - openai>=1.10.0
+    - redis>=5.0.0
+  
+  external:
+    - name: redis
+      description: Redis server for memory
+      check: "redis-cli ping"
+
+config:
+  path: config.yaml
+  defaults:
+    openai_api_key: null
+    elevenlabs_api_key: null
+    voice_provider: elevenlabs
+    elevenlabs_expressive: true
+    use_openclaw_memory: true
+    conversation_limit: 20
+    enable_web_ui: true
+    web_ui_port: 9004
+
+entry_points:
+  module: src.voice_chat_skill
+  commands:
+    status: integration.commands:status
+    config: integration.commands:config
+  hooks:
+    on_install: hooks/on_install.sh
+    on_enable: hooks/on_enable.sh
+    on_disable: hooks/on_disable.sh
+    on_message: integration.hooks:on_message
+    get_context: integration.hooks:get_context
+
+openclaw:
+  auto_enable: true
+  session_hooks:
+    on_voice_message: process_voice
+    get_voice_context: get_conversation_context
+  permissions:
+    filesystem:
+      - path: ~/.openclaw/skills/voice-chat-v2
+        access: read-write
+    network:
+      - host: api.openai.com
+      - host: api.elevenlabs.io
+      - host: api.open-meteo.com

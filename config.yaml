@@ -1,0 +1,24 @@
+# Voice Chat v2 - Skill Configuration
+
+# API Keys (set via environment variables or edit here)
+# OPENAI_API_KEY=your_key_here
+# ELEVENLABS_API_KEY=your_key_here (optional)
+
+openai_api_key: null
+elevenlabs_api_key: null
+
+# Voice Settings
+voice_provider: elevenlabs  # 'elevenlabs' or 'openai'
+elevenlabs_expressive: true  # Higher quality, slower
+
+# Memory Settings
+use_openclaw_memory: true  # Use OpenClaw's Redis/Qdrant
+conversation_limit: 20
+
+# Web UI (optional)
+enable_web_ui: false  # Set to true to enable web interface
+web_ui_port: 9004
+web_ui_host: "0.0.0.0"
+
+# Logging
+log_level: INFO
