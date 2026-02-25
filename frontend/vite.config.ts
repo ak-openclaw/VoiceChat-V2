@@ -7,7 +7,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:9004',
+        target: 'http://localhost:9005',  // OpenClaw Bridge
         changeOrigin: true,
       },
     },
