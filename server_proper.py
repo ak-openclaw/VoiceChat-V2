@@ -262,4 +262,4 @@ if __name__ == "__main__":
     print("🎙️ Voice Chat v2 - Proper Architecture")
     print("📱 Backend serves HTML + API (like V1)")
     print("🔗 Port: 9009")
-    uvicorn.run(app, host="0.0.0.0", port=9009)
+    uvicorn.run(app, host="0.0.0.0", port=9010)

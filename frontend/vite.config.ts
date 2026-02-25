@@ -5,20 +5,14 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    host: true,  // Allow external access
-    allowedHosts: [
-      'localhost',
-      '*.ngrok-free.dev',
-      '*.ngrok.io',
-      'creasy-tommy-unfragmented.ngrok-free.dev',
-      'all'  // Allow all hosts (for development)
-    ],
+    host: true,
+    allowedHosts: ['.ngrok-free.dev', '.ngrok.io', 'all'],
     proxy: {
       '/api': {
-        target: 'http://localhost:9005',
+        target: 'http://localhost:9004',
         changeOrigin: true,
+        secure: false,
       },
     },
-    cors: true,
   },
 })

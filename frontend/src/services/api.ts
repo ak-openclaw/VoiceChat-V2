@@ -1,33 +1,56 @@
-import axios from 'axios';
-import { VoiceChatResponse, HealthStatus, Skill } from '../types';
-
+// API service - uses relative URLs (vite proxies to backend)
 const API_BASE = '/api';
 
+export interface ChatResponse {
+  text: string;
+  transcription?: string;
+  skill_used?: string;
+  source: string;
+  error?: string;
+  audio?: string;
+}
+
 export const api = {
-  async healthCheck(): Promise<HealthStatus> {
-    const response = await axios.get(`${API_BASE}/health`);
-    return response.data;
+  async sendMessage(message: string): Promise<ChatResponse> {
+    const formData = new FormData();
+    formData.append('message', message);
+    formData.append('session_id', 'voice-web');
+
+    const response = await fetch(`${API_BASE}/chat`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    return response.json();
   },
 
-  async sendVoiceMessage(
-    audioBlob: Blob,
-    sessionId: string = 'default'
-  ): Promise<VoiceChatResponse> {
+  async sendVoiceMessage(audioBlob: Blob): Promise<ChatResponse> {
     const formData = new FormData();
     formData.append('audio', audioBlob, 'recording.webm');
-    formData.append('session_id', sessionId);
-    formData.append('voice_provider', 'elevenlabs');
+    formData.append('session_id', 'voice-web');
 
-    const response = await axios.post(`${API_BASE}/voice-chat`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
+    const response = await fetch(`${API_BASE}/voice-chat`, {
+      method: 'POST',
+      body: formData,
     });
-    return response.data;
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    return response.json();
   },
 
-  async listSkills(): Promise<{ skills: Skill[]; count: number }> {
-    const response = await axios.get(`${API_BASE}/skills`);
-    return response.data;
-  },
+  async healthCheck(): Promise<{ status: string; version: string; session: string } | null> {
+    try {
+      const response = await fetch(`${API_BASE}/health`);
+      return response.json();
+    } catch {
+      return null;
+    }
+  }
 };
