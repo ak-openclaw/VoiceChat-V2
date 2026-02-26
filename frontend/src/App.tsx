@@ -6,57 +6,21 @@ import { api, ChatResponse } from './services/api';
 import { ChatMessage } from './types';
 import './App.css';
 
-// Audio manager outside component to survive re-renders
-const audioManager = {
+// GLOBAL locks - survive re-renders, HMR, everything
+const globalLocks = {
+  isProcessing: false,
+  lastBlobId: null as string | null,
+  playedAudios: new Set<string>(),
   currentAudio: null as HTMLAudioElement | null,
-  playedIds: new Set<string>(),
-  
-  play(audioUrl: string, messageId: string): boolean {
-    // Check if already played
-    if (this.playedIds.has(messageId)) {
-      console.log('Audio already played for message:', messageId);
-      return false;
-    }
-    
-    // Stop any current audio
-    this.stop();
-    
-    // Create and play new audio
-    const audio = new Audio(audioUrl);
-    this.currentAudio = audio;
-    this.playedIds.add(messageId);
-    
-    audio.play().catch(e => console.log('Auto-play prevented:', e));
-    
-    // Cleanup when done
-    audio.onended = () => {
-      this.currentAudio = null;
-    };
-    
-    return true;
-  },
-  
-  stop() {
-    if (this.currentAudio) {
-      this.currentAudio.pause();
-      this.currentAudio.currentTime = 0;
-      this.currentAudio = null;
-    }
-  },
-  
-  isPlaying(): boolean {
-    return this.currentAudio !== null && !this.currentAudio.paused;
-  }
 };
 
 function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [lastProcessedId, setLastProcessedId] = useState<string | null>(null);
+  const [sessionId] = useState(() => `session_${Date.now()}`); // Unique session ID
   
-  // Prevent duplicate processing
-  const processingRef = useRef(false);
-  const hasProcessedAudioForCurrentSession = useRef(false);
+  // Refs for cleanup
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const {
     isRecording,
@@ -67,100 +31,163 @@ function App() {
     error: audioError,
   } = useAudio();
 
-  // Handle audio playback when new assistant message arrives
-  useEffect(() => {
-    const lastMessage = messages[messages.length - 1];
-    
-    if (lastMessage?.role === 'assistant' && 
-        lastMessage.audioUrl && 
-        lastMessage.id !== lastProcessedId) {
-      
-      console.log('Playing audio for message:', lastMessage.id);
-      audioManager.play(lastMessage.audioUrl, lastMessage.id);
-      setLastProcessedId(lastMessage.id);
-    }
-  }, [messages, lastProcessedId]);
-
-  // Cleanup on unmount
+  // Cleanup timeouts on unmount
   useEffect(() => {
     return () => {
-      audioManager.stop();
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      if (globalLocks.currentAudio) {
+        globalLocks.currentAudio.pause();
+        globalLocks.currentAudio = null;
+      }
     };
   }, []);
 
-  const handleOrbClick = useCallback(async () => {
-    if (isRecording) {
-      // STOPPING RECORDING
-      console.log('Stopping recording...');
-      
-      // Prevent processing if already handling
-      if (processingRef.current) {
-        console.log('Already processing, ignoring click');
+  // Handle new assistant messages - play audio
+  useEffect(() => {
+    const lastMsg = messages[messages.length - 1];
+    
+    if (lastMsg?.role === 'assistant' && lastMsg.audioUrl && lastMsg.id) {
+      // Check if already played
+      if (globalLocks.playedAudios.has(lastMsg.id)) {
+        console.log('Audio already played for:', lastMsg.id);
         return;
       }
       
-      processingRef.current = true;
+      // Mark as played immediately
+      globalLocks.playedAudios.add(lastMsg.id);
+      
+      // Stop any current audio
+      if (globalLocks.currentAudio) {
+        globalLocks.currentAudio.pause();
+        globalLocks.currentAudio.currentTime = 0;
+      }
+      
+      // Play new audio
+      console.log('Playing audio for message:', lastMsg.id);
+      const audio = new Audio(lastMsg.audioUrl);
+      globalLocks.currentAudio = audio;
+      
+      audio.play().catch(err => {
+        console.log('Audio play failed:', err);
+      });
+      
+      audio.onended = () => {
+        if (globalLocks.currentAudio === audio) {
+          globalLocks.currentAudio = null;
+        }
+      };
+    }
+  }, [messages]);
+
+  const handleOrbClick = useCallback(async () => {
+    console.log('Orb clicked. Recording:', isRecording, 'Processing:', globalLocks.isProcessing);
+    
+    if (isRecording) {
+      // STOP RECORDING
+      
+      // GLOBAL LOCK - prevent any duplicate processing
+      if (globalLocks.isProcessing) {
+        console.log('GLOBAL LOCK: Already processing, ignoring click');
+        return;
+      }
+      
+      globalLocks.isProcessing = true;
+      console.log('GLOBAL LOCK: Acquired');
+      
+      // Clear any existing timeout
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      
       stopRecording();
-
-      // Wait for audio blob
-      setTimeout(async () => {
+      
+      // Wait for blob with single timeout
+      timeoutRef.current = setTimeout(async () => {
         try {
-          if (audioBlob && audioBlob.size > 1000) {
-            console.log('Processing audio blob:', audioBlob.size, 'bytes');
-            setIsLoading(true);
-
-            // Send to agent
-            const response: ChatResponse = await api.sendVoiceMessageToAgent(
-              audioBlob, 
-              'telegram:main:ak'
-            );
-
-            console.log('Got response:', response.text?.substring(0, 50));
-
-            // Add messages
-            const userMessage: ChatMessage = {
+          if (!audioBlob || audioBlob.size < 1000) {
+            console.log('No valid audio blob');
+            globalLocks.isProcessing = false;
+            return;
+          }
+          
+          // Generate unique blob ID to prevent duplicate sends
+          const blobId = `${audioBlob.size}_${Date.now()}`;
+          if (globalLocks.lastBlobId === blobId) {
+            console.log('Same blob already sent, skipping');
+            return;
+          }
+          globalLocks.lastBlobId = blobId;
+          
+          console.log('Processing blob:', audioBlob.size, 'bytes');
+          setIsLoading(true);
+          
+          // Send to backend
+          const response: ChatResponse = await api.sendVoiceMessageToAgent(
+            audioBlob,
+            'telegram:main:ak'
+          );
+          
+          console.log('Response received:', response.text?.substring(0, 50));
+          
+          // Add messages
+          setMessages(prev => [
+            ...prev,
+            {
               id: `user_${Date.now()}`,
               role: 'user',
               content: response.transcription || 'Voice message',
               timestamp: new Date(),
-            };
-
-            const assistantMessage: ChatMessage = {
+            },
+            {
               id: `assistant_${Date.now()}`,
               role: 'assistant',
               content: response.text,
               timestamp: new Date(),
               audioUrl: response.audio ? `data:audio/mp3;base64,${response.audio}` : undefined,
-            };
-
-            setMessages(prev => [...prev, userMessage, assistantMessage]);
-          } else {
-            console.log('Audio blob too small or missing:', audioBlob?.size);
-          }
+            }
+          ]);
+          
         } catch (error) {
           console.error('Error:', error);
-          const errorMessage: ChatMessage = {
-            id: `error_${Date.now()}`,
-            role: 'assistant',
-            content: 'Sorry, I had trouble processing that. Please try again.',
-            timestamp: new Date(),
-          };
-          setMessages(prev => [...prev, errorMessage]);
+          setMessages(prev => [
+            ...prev,
+            {
+              id: `error_${Date.now()}`,
+              role: 'assistant',
+              content: 'Sorry, I had trouble processing that.',
+              timestamp: new Date(),
+            }
+          ]);
         } finally {
           setIsLoading(false);
-          processingRef.current = false;
+          globalLocks.isProcessing = false;
+          console.log('GLOBAL LOCK: Released');
         }
-      }, 800); // Increased timeout to ensure blob is ready
-
+      }, 600);
+      
     } else {
-      // STARTING RECORDING
+      // START RECORDING
       console.log('Starting recording...');
       
       // Stop any playing audio
-      audioManager.stop();
+      if (globalLocks.currentAudio) {
+        globalLocks.currentAudio.pause();
+        globalLocks.currentAudio.currentTime = 0;
+        globalLocks.currentAudio = null;
+      }
       
-      // Reset processing state
-      processingRef.current = false;
+      // Reset locks
+      globalLocks.isProcessing = false;
+      globalLocks.lastBlobId = null;
+      
+      // Clear any pending timeouts
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
       
       await startRecording();
     }
@@ -172,7 +199,11 @@ function App() {
         <h1>Voice Chat v2</h1>
         <div className="connection-status">
           <span className={`status-dot ${isRecording ? 'recording' : 'online'}`}></span>
-          <span>{isRecording ? 'Recording...' : 'Connected'}</span>
+          <span>
+            {isRecording ? 'Recording...' : 
+             isLoading ? 'Processing...' : 
+             globalLocks.isProcessing ? 'Sending...' : 'Ready'}
+          </span>
         </div>
       </header>
 
@@ -188,10 +219,11 @@ function App() {
             isRecording={isRecording}
             audioLevel={audioLevel}
             onClick={handleOrbClick}
-            disabled={isLoading}
+            disabled={isLoading || globalLocks.isProcessing}
           />
           <p className="recording-hint">
-            {isRecording ? 'Tap to stop and send' : isLoading ? 'Processing...' : 'Tap to speak'}
+            {isRecording ? 'Tap to stop' : 
+             isLoading || globalLocks.isProcessing ? 'Please wait...' : 'Tap to speak'}
           </p>
         </div>
       </main>

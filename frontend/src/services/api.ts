@@ -13,6 +13,9 @@ export interface ChatResponse {
 // Track in-flight requests to prevent duplicates
 const inFlightRequests = new Map<string, Promise<ChatResponse>>();
 
+// Global request lock
+let isRequestInFlight = false;
+
 export const api = {
   async sendMessage(message: string): Promise<ChatResponse> {
     const formData = new FormData();
@@ -50,14 +53,13 @@ export const api = {
 
   // NEW: Send voice message through OpenClaw Agent (shared session with Telegram)
   async sendVoiceMessageToAgent(audioBlob: Blob, sessionId: string = 'telegram:main:ak'): Promise<ChatResponse> {
-    // Create unique key for this request
-    const requestKey = `${sessionId}_${audioBlob.size}_${Date.now()}`;
-    
-    // Check if identical request is in flight
-    if (inFlightRequests.has(requestKey)) {
-      console.log('Duplicate request detected, returning existing promise');
-      return inFlightRequests.get(requestKey)!;
+    // GLOBAL LOCK - prevent ANY concurrent requests
+    if (isRequestInFlight) {
+      console.log('🚫 Request already in flight, rejecting new request');
+      throw new Error('Request already in progress');
     }
+    
+    isRequestInFlight = true;
     
     const formData = new FormData();
     formData.append('audio', audioBlob, 'recording.webm');
@@ -66,31 +68,23 @@ export const api = {
 
     console.log(`🎤 Sending to Agent (session: ${sessionId})...`);
 
-    // Create the request promise
-    const requestPromise = (async () => {
-      try {
-        const response = await fetch(`${API_BASE}/voice-chat-agent`, {
-          method: 'POST',
-          body: formData,
-        });
+    try {
+      const response = await fetch(`${API_BASE}/voice-chat-agent`, {
+        method: 'POST',
+        body: formData,
+      });
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const data = await response.json();
-        console.log(`📥 Agent response: ${data.skill_used ? `[${data.skill_used}] ` : ''}${data.response?.substring(0, 50)}...`);
-        return data;
-      } finally {
-        // Clean up after request completes
-        inFlightRequests.delete(requestKey);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
-    })();
-    
-    // Track this request
-    inFlightRequests.set(requestKey, requestPromise);
-    
-    return requestPromise;
+
+      const data = await response.json();
+      console.log(`📥 Agent response: ${data.skill_used ? `[${data.skill_used}] ` : ''}${data.response?.substring(0, 50)}...`);
+      return data;
+    } finally {
+      // Release lock
+      isRequestInFlight = false;
+    }
   },
 
   async healthCheck(): Promise<{ status: string; version: string; session: string } | null> {
