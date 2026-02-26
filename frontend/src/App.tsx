@@ -40,7 +40,8 @@ function App() {
           setIsLoading(true);
 
           try {
-            const response: ChatResponse = await api.sendVoiceMessage(audioBlob);
+            // Use OpenClaw Agent integration (shared session with Telegram)
+            const response: ChatResponse = await api.sendVoiceMessageToAgent(audioBlob, 'telegram:main:ak');
 
             const userMessage: ChatMessage = {
               id: `user_${Date.now()}`,

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
-from app.api import voice, skills, health
+from app.api import voice, skills, health, openclaw_voice, voice_agent
 from app.config import get_settings
 
 
@@ -37,7 +37,9 @@ app.add_middleware(
 
 # Include routers
 app.include_router(health.router, prefix="/api", tags=["health"])
-app.include_router(voice.router, prefix="/api", tags=["voice"])
+app.include_router(voice.router, prefix="/api", tags=["voice"])  # Original direct GPT route
+app.include_router(openclaw_voice.router, prefix="/api", tags=["openclaw"])  # HTTP bridge attempt
+app.include_router(voice_agent.router, prefix="/api", tags=["agent"])  # NEW: Shared memory bridge
 app.include_router(skills.router, prefix="/api", tags=["skills"])
 
 
