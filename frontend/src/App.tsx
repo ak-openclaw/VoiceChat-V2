@@ -96,77 +96,79 @@ function App() {
       globalLocks.isProcessing = true;
       console.log('GLOBAL LOCK: Acquired');
       
-      // Clear any existing timeout
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
+      setIsLoading(true);
       
-      stopRecording();
-      
-      // Wait for blob with single timeout
-      timeoutRef.current = setTimeout(async () => {
-        try {
-          if (!audioBlob || audioBlob.size < 1000) {
-            console.log('No valid audio blob');
-            globalLocks.isProcessing = false;
-            return;
-          }
-          
-          // Generate unique blob ID to prevent duplicate sends
-          const blobId = `${audioBlob.size}_${Date.now()}`;
-          if (globalLocks.lastBlobId === blobId) {
-            console.log('Same blob already sent, skipping');
-            return;
-          }
-          globalLocks.lastBlobId = blobId;
-          
-          console.log('Processing blob:', audioBlob.size, 'bytes');
-          setIsLoading(true);
-          
-          // Send to backend
-          const response: ChatResponse = await api.sendVoiceMessageToAgent(
-            audioBlob,
-            'telegram:main:ak'
-          );
-          
-          console.log('Response received:', response.text?.substring(0, 50));
-          
-          // Add messages
-          setMessages(prev => [
-            ...prev,
-            {
-              id: `user_${Date.now()}`,
-              role: 'user',
-              content: response.transcription || 'Voice message',
-              timestamp: new Date(),
-            },
-            {
-              id: `assistant_${Date.now()}`,
-              role: 'assistant',
-              content: response.text,
-              timestamp: new Date(),
-              audioUrl: response.audio ? `data:audio/mp3;base64,${response.audio}` : undefined,
-            }
-          ]);
-          
-        } catch (error) {
-          console.error('Error:', error);
+      try {
+        // Stop recording and get blob directly (waits for blob to be ready)
+        console.log('Stopping recording and waiting for blob...');
+        const blob = await stopRecording();
+        
+        if (!blob || blob.size < 1000) {
+          console.log('No valid audio blob, size:', blob?.size);
           setMessages(prev => [
             ...prev,
             {
               id: `error_${Date.now()}`,
               role: 'assistant',
-              content: 'Sorry, I had trouble processing that.',
+              content: 'Recording too short. Please try again.',
               timestamp: new Date(),
             }
           ]);
-        } finally {
-          setIsLoading(false);
-          globalLocks.isProcessing = false;
-          console.log('GLOBAL LOCK: Released');
+          return;
         }
-      }, 600);
+        
+        // Generate unique blob ID to prevent duplicate sends
+        const blobId = `${blob.size}_${Date.now()}`;
+        if (globalLocks.lastBlobId === blobId) {
+          console.log('Same blob already sent, skipping');
+          return;
+        }
+        globalLocks.lastBlobId = blobId;
+        
+        console.log('Processing blob:', blob.size, 'bytes');
+        
+        // Send to backend
+        const response: ChatResponse = await api.sendVoiceMessageToAgent(
+          blob,
+          'telegram:main:ak'
+        );
+        
+        console.log('Response received:', response.text?.substring(0, 50));
+        
+        // Add messages
+        setMessages(prev => [
+          ...prev,
+          {
+            id: `user_${Date.now()}`,
+            role: 'user',
+            content: response.transcription || 'Voice message',
+            timestamp: new Date(),
+          },
+          {
+            id: `assistant_${Date.now()}`,
+            role: 'assistant',
+            content: response.text,
+            timestamp: new Date(),
+            audioUrl: response.audio ? `data:audio/mp3;base64,${response.audio}` : undefined,
+          }
+        ]);
+        
+      } catch (error) {
+        console.error('Error:', error);
+        setMessages(prev => [
+          ...prev,
+          {
+            id: `error_${Date.now()}`,
+            role: 'assistant',
+            content: 'Sorry, I had trouble processing that.',
+            timestamp: new Date(),
+          }
+        ]);
+      } finally {
+        setIsLoading(false);
+        globalLocks.isProcessing = false;
+        console.log('GLOBAL LOCK: Released');
+      }
       
     } else {
       // START RECORDING
@@ -191,7 +193,7 @@ function App() {
       
       await startRecording();
     }
-  }, [isRecording, audioBlob, stopRecording, startRecording]);
+  }, [isRecording, stopRecording, startRecording]);
 
   return (
     <div className="app">

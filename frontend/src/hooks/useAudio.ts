@@ -5,7 +5,7 @@ interface UseAudioReturn {
   audioLevel: number;
   audioBlob: Blob | null;
   startRecording: () => Promise<void>;
-  stopRecording: () => void;
+  stopRecording: () => Promise<Blob | null>;
   error: string | null;
 }
 
@@ -21,6 +21,8 @@ export const useAudio = (): UseAudioReturn => {
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const blobPromiseRef = useRef<Promise<Blob | null> | null>(null);
+  const blobResolveRef = useRef<((blob: Blob | null) => void) | null>(null);
 
   const updateAudioLevel = useCallback(() => {
     if (!analyserRef.current) return;
@@ -41,7 +43,13 @@ export const useAudio = (): UseAudioReturn => {
   const startRecording = async () => {
     try {
       setError(null);
+      setAudioBlob(null);
       chunksRef.current = [];
+      
+      // Create promise for blob availability
+      blobPromiseRef.current = new Promise((resolve) => {
+        blobResolveRef.current = resolve;
+      });
 
       // Get microphone stream
       const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -78,6 +86,17 @@ export const useAudio = (): UseAudioReturn => {
       mediaRecorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
         setAudioBlob(blob);
+        // Resolve the promise with the blob
+        if (blobResolveRef.current) {
+          blobResolveRef.current(blob);
+        }
+      };
+
+      mediaRecorder.onerror = (event) => {
+        console.error('MediaRecorder error:', event);
+        if (blobResolveRef.current) {
+          blobResolveRef.current(null);
+        }
       };
 
       mediaRecorder.start(100); // Collect data every 100ms
@@ -87,33 +106,67 @@ export const useAudio = (): UseAudioReturn => {
     } catch (err) {
       setError('Microphone access denied or not available');
       console.error('Error starting recording:', err);
+      if (blobResolveRef.current) {
+        blobResolveRef.current(null);
+      }
     }
   };
 
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+  const stopRecording = async (): Promise<Blob | null> => {
+    return new Promise((resolve) => {
+      // If already stopped or not recording, return current blob
+      if (!isRecording || !mediaRecorderRef.current) {
+        resolve(audioBlob);
+        return;
+      }
+
+      // Set up one-time listener for when blob is ready
+      const checkBlob = () => {
+        if (mediaRecorderRef.current?.state === 'inactive') {
+          // Recorder is stopped, blob should be available soon
+          setTimeout(() => {
+            const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+            setAudioBlob(blob);
+            resolve(blob);
+          }, 100);
+        } else {
+          // Check again in 50ms
+          setTimeout(checkBlob, 50);
+        }
+      };
+
+      // Stop the recorder
       mediaRecorderRef.current.stop();
       setIsRecording(false);
-    }
 
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-    }
+      // Wait for blob to be ready
+      checkBlob();
 
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-    }
+      // Cleanup
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
 
-    if (animationFrameRef.current) {
-      cancelAnimationFrame(animationFrameRef.current);
-    }
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
 
-    setAudioLevel(0);
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+
+      setAudioLevel(0);
+    });
   };
 
   useEffect(() => {
     return () => {
-      stopRecording();
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
     };
   }, []);
 
