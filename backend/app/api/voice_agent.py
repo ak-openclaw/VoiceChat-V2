@@ -1,6 +1,6 @@
 import asyncio
 import base64
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from typing import Optional
 
 from app.models import VoiceChatRequest, VoiceChatResponse

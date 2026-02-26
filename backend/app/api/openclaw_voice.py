@@ -1,6 +1,6 @@
 import asyncio
 import base64
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Depends
 from typing import Optional
 import time
 

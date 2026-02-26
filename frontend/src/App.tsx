@@ -10,6 +10,7 @@ function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const isProcessingRef = useRef(false);  // Prevent duplicate requests
 
   const {
     isRecording,
@@ -37,6 +38,13 @@ function App() {
 
       setTimeout(async () => {
         if (audioBlob && audioBlob.size > 1000) {
+          // Prevent duplicate requests
+          if (isProcessingRef.current) {
+            console.log('Already processing, skipping duplicate');
+            return;
+          }
+          
+          isProcessingRef.current = true;
           setIsLoading(true);
 
           try {
@@ -70,6 +78,7 @@ function App() {
             setMessages((prev) => [...prev, errorMessage]);
           } finally {
             setIsLoading(false);
+            isProcessingRef.current = false;
           }
         }
       }, 500);
