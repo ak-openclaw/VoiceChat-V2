@@ -6,12 +6,57 @@ import { api, ChatResponse } from './services/api';
 import { ChatMessage } from './types';
 import './App.css';
 
+// Audio manager outside component to survive re-renders
+const audioManager = {
+  currentAudio: null as HTMLAudioElement | null,
+  playedIds: new Set<string>(),
+  
+  play(audioUrl: string, messageId: string): boolean {
+    // Check if already played
+    if (this.playedIds.has(messageId)) {
+      console.log('Audio already played for message:', messageId);
+      return false;
+    }
+    
+    // Stop any current audio
+    this.stop();
+    
+    // Create and play new audio
+    const audio = new Audio(audioUrl);
+    this.currentAudio = audio;
+    this.playedIds.add(messageId);
+    
+    audio.play().catch(e => console.log('Auto-play prevented:', e));
+    
+    // Cleanup when done
+    audio.onended = () => {
+      this.currentAudio = null;
+    };
+    
+    return true;
+  },
+  
+  stop() {
+    if (this.currentAudio) {
+      this.currentAudio.pause();
+      this.currentAudio.currentTime = 0;
+      this.currentAudio = null;
+    }
+  },
+  
+  isPlaying(): boolean {
+    return this.currentAudio !== null && !this.currentAudio.paused;
+  }
+};
+
 function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const isProcessingRef = useRef(false);  // Prevent duplicate requests
-  const playedMessageIds = useRef<Set<string>>(new Set());  // Track played audio
+  const [lastProcessedId, setLastProcessedId] = useState<string | null>(null);
+  
+  // Prevent duplicate processing
+  const processingRef = useRef(false);
+  const hasProcessedAudioForCurrentSession = useRef(false);
 
   const {
     isRecording,
@@ -22,68 +67,57 @@ function App() {
     error: audioError,
   } = useAudio();
 
-  // Auto-play audio for NEW assistant messages only
+  // Handle audio playback when new assistant message arrives
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
     
-    // Only play if:
-    // 1. It's an assistant message
-    // 2. It has audio
-    // 3. We haven't played it before
     if (lastMessage?.role === 'assistant' && 
         lastMessage.audioUrl && 
-        !playedMessageIds.current.has(lastMessage.id)) {
+        lastMessage.id !== lastProcessedId) {
       
-      // Mark as played
-      playedMessageIds.current.add(lastMessage.id);
-      
-      // Stop any currently playing audio
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-      
-      // Create and play new audio
-      const audio = new Audio(lastMessage.audioUrl);
-      audioRef.current = audio;
-      
-      audio.play().catch(e => {
-        console.log('Auto-play prevented:', e);
-      });
+      console.log('Playing audio for message:', lastMessage.id);
+      audioManager.play(lastMessage.audioUrl, lastMessage.id);
+      setLastProcessedId(lastMessage.id);
     }
-  }, [messages]);
+  }, [messages, lastProcessedId]);
 
-  // Cleanup audio on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
+      audioManager.stop();
     };
   }, []);
 
   const handleOrbClick = useCallback(async () => {
     if (isRecording) {
-      // STOP recording and process
+      // STOPPING RECORDING
+      console.log('Stopping recording...');
+      
+      // Prevent processing if already handling
+      if (processingRef.current) {
+        console.log('Already processing, ignoring click');
+        return;
+      }
+      
+      processingRef.current = true;
       stopRecording();
 
-      // Wait for audio blob to be ready
+      // Wait for audio blob
       setTimeout(async () => {
-        if (audioBlob && audioBlob.size > 1000) {
-          // Prevent duplicate requests
-          if (isProcessingRef.current) {
-            console.log('Already processing, skipping duplicate');
-            return;
-          }
-          
-          isProcessingRef.current = true;
-          setIsLoading(true);
+        try {
+          if (audioBlob && audioBlob.size > 1000) {
+            console.log('Processing audio blob:', audioBlob.size, 'bytes');
+            setIsLoading(true);
 
-          try {
-            // Use OpenClaw Agent integration (shared session with Telegram)
-            const response: ChatResponse = await api.sendVoiceMessageToAgent(audioBlob, 'telegram:main:ak');
+            // Send to agent
+            const response: ChatResponse = await api.sendVoiceMessageToAgent(
+              audioBlob, 
+              'telegram:main:ak'
+            );
 
+            console.log('Got response:', response.text?.substring(0, 50));
+
+            // Add messages
             const userMessage: ChatMessage = {
               id: `user_${Date.now()}`,
               role: 'user',
@@ -99,29 +133,35 @@ function App() {
               audioUrl: response.audio ? `data:audio/mp3;base64,${response.audio}` : undefined,
             };
 
-            setMessages((prev) => [...prev, userMessage, assistantMessage]);
-          } catch (error) {
-            console.error('Error:', error);
-            const errorMessage: ChatMessage = {
-              id: `error_${Date.now()}`,
-              role: 'assistant',
-              content: 'Sorry, I had trouble processing that. Please try again.',
-              timestamp: new Date(),
-            };
-            setMessages((prev) => [...prev, errorMessage]);
-          } finally {
-            setIsLoading(false);
-            isProcessingRef.current = false;
+            setMessages(prev => [...prev, userMessage, assistantMessage]);
+          } else {
+            console.log('Audio blob too small or missing:', audioBlob?.size);
           }
+        } catch (error) {
+          console.error('Error:', error);
+          const errorMessage: ChatMessage = {
+            id: `error_${Date.now()}`,
+            role: 'assistant',
+            content: 'Sorry, I had trouble processing that. Please try again.',
+            timestamp: new Date(),
+          };
+          setMessages(prev => [...prev, errorMessage]);
+        } finally {
+          setIsLoading(false);
+          processingRef.current = false;
         }
-      }, 500);
+      }, 800); // Increased timeout to ensure blob is ready
+
     } else {
-      // START recording
-      // Stop any playing audio first
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
+      // STARTING RECORDING
+      console.log('Starting recording...');
+      
+      // Stop any playing audio
+      audioManager.stop();
+      
+      // Reset processing state
+      processingRef.current = false;
+      
       await startRecording();
     }
   }, [isRecording, audioBlob, stopRecording, startRecording]);
@@ -131,8 +171,8 @@ function App() {
       <header className="app-header">
         <h1>Voice Chat v2</h1>
         <div className="connection-status">
-          <span className="status-dot online"></span>
-          <span>Connected to OpenClaw</span>
+          <span className={`status-dot ${isRecording ? 'recording' : 'online'}`}></span>
+          <span>{isRecording ? 'Recording...' : 'Connected'}</span>
         </div>
       </header>
 
@@ -151,7 +191,7 @@ function App() {
             disabled={isLoading}
           />
           <p className="recording-hint">
-            {isRecording ? 'Tap to stop and send' : 'Tap to speak'}
+            {isRecording ? 'Tap to stop and send' : isLoading ? 'Processing...' : 'Tap to speak'}
           </p>
         </div>
       </main>
