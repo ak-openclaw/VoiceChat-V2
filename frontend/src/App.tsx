@@ -11,6 +11,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const isProcessingRef = useRef(false);  // Prevent duplicate requests
+  const playedMessageIds = useRef<Set<string>>(new Set());  // Track played audio
 
   const {
     isRecording,
@@ -21,21 +22,53 @@ function App() {
     error: audioError,
   } = useAudio();
 
-  // Auto-play audio when messages change
+  // Auto-play audio for NEW assistant messages only
   useEffect(() => {
     const lastMessage = messages[messages.length - 1];
-    if (lastMessage?.role === 'assistant' && lastMessage.audioUrl) {
-      // Create and play audio
+    
+    // Only play if:
+    // 1. It's an assistant message
+    // 2. It has audio
+    // 3. We haven't played it before
+    if (lastMessage?.role === 'assistant' && 
+        lastMessage.audioUrl && 
+        !playedMessageIds.current.has(lastMessage.id)) {
+      
+      // Mark as played
+      playedMessageIds.current.add(lastMessage.id);
+      
+      // Stop any currently playing audio
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      
+      // Create and play new audio
       const audio = new Audio(lastMessage.audioUrl);
       audioRef.current = audio;
-      audio.play().catch(e => console.log('Auto-play prevented:', e));
+      
+      audio.play().catch(e => {
+        console.log('Auto-play prevented:', e);
+      });
     }
   }, [messages]);
 
+  // Cleanup audio on unmount
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
   const handleOrbClick = useCallback(async () => {
     if (isRecording) {
+      // STOP recording and process
       stopRecording();
 
+      // Wait for audio blob to be ready
       setTimeout(async () => {
         if (audioBlob && audioBlob.size > 1000) {
           // Prevent duplicate requests
@@ -83,6 +116,12 @@ function App() {
         }
       }, 500);
     } else {
+      // START recording
+      // Stop any playing audio first
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
       await startRecording();
     }
   }, [isRecording, audioBlob, stopRecording, startRecording]);
@@ -93,7 +132,7 @@ function App() {
         <h1>Voice Chat v2</h1>
         <div className="connection-status">
           <span className="status-dot online"></span>
-          <span>Connected</span>
+          <span>Connected to OpenClaw</span>
         </div>
       </header>
 
@@ -112,13 +151,13 @@ function App() {
             disabled={isLoading}
           />
           <p className="recording-hint">
-            {isRecording ? 'Tap to stop' : 'Tap to speak'}
+            {isRecording ? 'Tap to stop and send' : 'Tap to speak'}
           </p>
         </div>
       </main>
 
       <footer className="app-footer">
-        <p>Powered by OpenClaw</p>
+        <p>Powered by OpenClaw Agent</p>
       </footer>
     </div>
   );
