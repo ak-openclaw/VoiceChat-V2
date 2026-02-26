@@ -44,3 +44,36 @@ app.include_router(skills.router, prefix="/api", tags=["skills"])
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=9004, reload=True)
+
+# TTS support added
+import base64
+import httpx
+
+async def generate_tts(text: str) -> str:
+    """Generate TTS using OpenAI"""
+    try:
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            return None
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.openai.com/v1/audio/speech",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "tts-1",
+                    "input": text[:1000],  # Limit text length
+                    "voice": "alloy"
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                return base64.b64encode(response.content).decode('utf-8')
+            return None
+    except Exception as e:
+        print(f"TTS error: {e}")
+        return None

@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { VoiceOrb } from './components/VoiceOrb';
 import { ChatInterface } from './components/ChatInterface';
 import { useAudio } from './hooks/useAudio';
@@ -9,6 +9,7 @@ import './App.css';
 function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const {
     isRecording,
@@ -18,6 +19,17 @@ function App() {
     stopRecording,
     error: audioError,
   } = useAudio();
+
+  // Auto-play audio when messages change
+  useEffect(() => {
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage?.role === 'assistant' && lastMessage.audioUrl) {
+      // Create and play audio
+      const audio = new Audio(lastMessage.audioUrl);
+      audioRef.current = audio;
+      audio.play().catch(e => console.log('Auto-play prevented:', e));
+    }
+  }, [messages]);
 
   const handleOrbClick = useCallback(async () => {
     if (isRecording) {

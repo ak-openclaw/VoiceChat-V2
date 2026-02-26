@@ -123,6 +123,10 @@ class TTSService:
         Returns:
             Audio bytes
         """
+        # If ElevenLabs requested but no key, use OpenAI
+        if provider == "elevenlabs" and not self.elevenlabs_key:
+            provider = "openai"
+        
         if provider == "elevenlabs" and self.elevenlabs_key:
             # Try expressive mode first (if requested)
             if expressive:
