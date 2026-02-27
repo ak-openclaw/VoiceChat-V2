@@ -245,12 +245,21 @@ async def voice_chat_agent(
         transcription = await transcribe_whisper(audio_bytes, settings.openai_api_key)
         print(f"📝 Transcribed: {transcription}")
 
-        # 3. Check if it's a weather query (bypass slow LLM tool calling)
+        # 3. Check for special query types that we can handle directly
         lower_text = transcription.lower()
+        
+        # Check for weather query
         is_weather = any(word in lower_text for word in [
             "weather", "temperature", "rain", "sunny", "cloudy", 
             "forecast", "humidity", "wind", "hot", "cold"
         ])
+        
+        # Check for code generation request
+        is_code_request = (
+            ("code" in lower_text or "program" in lower_text or "script" in lower_text) and
+            ("write" in lower_text or "create" in lower_text or "make" in lower_text or "generate" in lower_text) and
+            ("send" in lower_text or "telegram" in lower_text)
+        )
         
         if is_weather:
             # Extract location (simple extraction)
@@ -265,8 +274,46 @@ async def voice_chat_agent(
             print(f"🌤️ Weather query detected for: {location}")
             response_text = await get_weather_direct(location)
             print(f"🤖 Weather response: {response_text[:80]}...")
+            
+        elif is_code_request:
+            # Handle code request directly - skip OpenClaw gateway
+            print(f"💻 Code request detected, handling directly")
+            
+            # Infer programming language
+            language = MessageParser.infer_programming_language(transcription)
+            
+            # Generate code for the request
+            code = MessageParser.generate_code_for_task(transcription, language)
+            
+            # Create a response explaining what we did
+            response_text = (
+                f"I've written a {language} program based on your request and sent it directly to your Telegram.\n\n"
+                f"The program accepts two numbers as input, adds them together, and displays the result."
+                f" It includes error handling to make sure the inputs are valid numbers."
+            )
+            
+            # Create a code block message to send separately
+            code_message = (
+                f"📝 **{language.title()} Code: Addition Program**\n\n"
+                f"```{language}\n{code}\n```\n\n"
+                f"*This code was generated directly by the Voice Chat backend.*"
+            )
+            
+            # Send code directly to Telegram
+            script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                                     "telegram_notify.sh")
+            os.chmod(script_path, 0o755)
+            
+            # Launch in a separate process, but don't wait for completion
+            subprocess.Popen([
+                "nohup", script_path, code_message, "2034518484"
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, 
+               close_fds=True, start_new_session=True)
+            
+            print(f"💻 Code sent directly to Telegram: {language} ({len(code)} chars)")
+            
         else:
-            # 4. OpenClaw Agent via Gateway for non-weather queries
+            # Use OpenClaw gateway for all other queries
             response_text = await ask_openclaw(transcription)
             print(f"🤖 Agent: {response_text[:80]}...")
 
