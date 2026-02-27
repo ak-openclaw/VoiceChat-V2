@@ -123,7 +123,7 @@ class MessageParser:
         if language == "python":
             if "fibonacci" in task_lower or "fib" in task_lower:
                 code = """def fibonacci_series(n):
-    """Generate Fibonacci series up to n terms"""
+    \"\"\"Generate Fibonacci series up to n terms\"\"\"
     # Initialize the first two terms
     fib = [0, 1]
     
