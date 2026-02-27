@@ -34,6 +34,12 @@ SESSION_KEY   = "telegram:main:ak"
 async def transcribe_whisper(audio_bytes: bytes, openai_key: str) -> str:
     """Transcribe audio using OpenAI Whisper API - converts to MP3"""
     try:
+        # FOR TESTING: Allow mock transcription via environment variable
+        mock_text = os.getenv("MOCK_TRANSCRIPTION")
+        if mock_text:
+            print(f"🧪 Using mock transcription: {mock_text}")
+            return mock_text
+            
         # Import here to avoid startup errors if not installed
         from pydub import AudioSegment
         
