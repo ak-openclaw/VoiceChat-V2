@@ -15,7 +15,7 @@ class TelegramCLI:
     
     async def send_message(self, message: str, chat_id: str = "2034518484") -> Dict[str, Any]:
         """
-        Send message to Telegram using OpenClaw CLI
+        Send message to Telegram using OpenClaw CLI broadcast
         
         Args:
             message: Message content
@@ -25,14 +25,12 @@ class TelegramCLI:
             Dict with success status
         """
         try:
-            # Prepare the message (escape quotes)
-            escaped_message = message.replace('"', '\\"')
-            
-            # Create a command that sends a message to Telegram
+            # Prepare the command that sends a message to Telegram
             cmd = [
-                "openclaw", "message", "send",
-                "--target", f"telegram:{chat_id}",
-                escaped_message
+                "openclaw", "message", "broadcast",
+                "--channel", "telegram",
+                "--targets", chat_id,
+                "--message", message
             ]
             
             # Execute the command asynchronously
@@ -49,14 +47,16 @@ class TelegramCLI:
             if process.returncode == 0:
                 return {
                     "success": True,
-                    "method": "openclaw-cli",
+                    "method": "openclaw-cli-broadcast",
                     "stdout": stdout.decode().strip(),
-                    "message_id": "cli-message"
+                    "message_id": "cli-broadcast"
                 }
             else:
+                error_msg = stderr.decode().strip()
+                print(f"CLI broadcast error: {error_msg}")
                 return {
                     "success": False,
-                    "error": f"CLI error (code {process.returncode}): {stderr.decode().strip()}",
+                    "error": f"CLI broadcast error (code {process.returncode}): {error_msg}",
                     "stdout": stdout.decode().strip()
                 }
                 
