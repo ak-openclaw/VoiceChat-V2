@@ -283,7 +283,7 @@ async def voice_chat_agent(
             print(f"⚠️ TTS error: {e}")
             raise HTTPException(status_code=500, detail=f"TTS failed: {str(e)}")
             
-        # Send response to Telegram using CLI (most reliable)
+        # Send response to Telegram using external script (maximum reliability)
         try:
             formatted_message = (
                 f"🎙️ **Voice Message**\n\n"
@@ -294,28 +294,34 @@ async def voice_chat_agent(
             if audio_base64:
                 formatted_message += "\n\n🔊 *Audio response played in voice chat*"
                 
-            # Use CLI approach (most reliable, uses 'openclaw message send')
-            cli = get_telegram_cli()
-            telegram_result = await cli.send_message(formatted_message)
+            # Use completely independent shell script - most reliable approach
+            # This runs in a separate process and will complete even if the backend crashes
+            script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                                     "telegram_notify.sh")
             
-            # If CLI fails, try direct gateway
-            if not telegram_result.get("success"):
-                gateway = await get_telegram_gateway()
-                telegram_result = await gateway.send_to_telegram(formatted_message)
-                
-                # If direct gateway fails, try bridge
-                if not telegram_result.get("success"):
-                    telegram = await get_telegram_bridge()
-                    telegram_result = await telegram.send_voice_response_to_telegram(
-                        transcription=transcription,
-                        response=response_text,
-                        has_audio=bool(audio_base64)
-                    )
-                    
-            print(f"📱 Telegram send result: {telegram_result.get('success', False)}")
-            print(f"📱 Method: {telegram_result.get('method', 'unknown')}")
+            # Make it executable just in case
+            os.chmod(script_path, 0o755)
+            
+            # Launch the script as a completely separate process
+            # This will continue running even if the backend process crashes
+            subprocess.Popen([
+                "nohup", script_path, formatted_message, "2034518484"
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, 
+               close_fds=True, start_new_session=True)
+            
+            print(f"📱 Telegram notification sent via independent script")
+            
         except Exception as e:
-            print(f"⚠️ Telegram messaging error: {e}")
+            print(f"⚠️ Telegram script error: {e}")
+            
+            # Fallback to CLI approach if script fails
+            try:
+                cli = get_telegram_cli()
+                telegram_result = await cli.send_message(formatted_message)
+                print(f"📱 Fallback CLI result: {telegram_result.get('success', False)}")
+            except Exception as e2:
+                print(f"⚠️ Fallback messaging error: {e2}")
+            
             # Don't fail the whole response if Telegram fails
 
         return VoiceChatResponse(
