@@ -226,13 +226,7 @@ async def voice_chat_agent(
     session_id: str = Form(SESSION_KEY),
     settings: Settings = Depends(get_settings)
 ):
-
-# ── Test endpoint for direct code generation ─────────────────────────────
-@router.post("/test-code-generation", response_model=VoiceChatResponse)
-async def test_code_generation(
-    request: str = Form(...),
-    settings: Settings = Depends(get_settings)
-):
+    """Full voice chat pipeline"""
     """
     Test endpoint that directly tests code generation without going through Whisper
     """
@@ -620,3 +614,74 @@ async def agent_status():
         }
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+# ── Test endpoint for direct code generation ─────────────────────────────
+@router.post("/test-code-generation", response_model=VoiceChatResponse)
+async def test_code_generation(
+    request: str = Form(...),
+    settings: Settings = Depends(get_settings)
+):
+    """
+    Test endpoint that directly tests code generation without going through Whisper
+    """
+    try:
+        print(f"💻 Code generation test request: {request}")
+        
+        # Infer programming language
+        language = MessageParser.infer_programming_language(request)
+        
+        # Generate code
+        code = MessageParser.generate_code_for_task(request, language)
+        
+        # Create a response
+        response_text = (
+            f"I've written a {language} program based on your request and sent it directly to your Telegram.\n\n"
+            f"The program accepts two numbers as input, adds them together, and displays the result."
+            f" It includes error handling to make sure the inputs are valid numbers."
+        )
+        
+        # Create a code message
+        code_message = (
+            f"📝 **{language.title()} Code: Addition Program**\n\n"
+            f"```{language}\n{code}\n```\n\n"
+            f"*This code was generated directly by the Voice Chat backend.*"
+        )
+        
+        # Send code to Telegram
+        script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
+                                 "telegram_notify.sh")
+        os.chmod(script_path, 0o755)
+        
+        subprocess.Popen([
+            "nohup", script_path, code_message, "2034518484"
+        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, 
+           close_fds=True, start_new_session=True)
+        
+        print(f"💻 Code sent directly to Telegram: {language} ({len(code)} chars)")
+        
+        # Generate TTS audio
+        audio_base64 = None
+        try:
+            elevenlabs_key = os.getenv("ELEVENLABS_API_KEY") or settings.elevenlabs_api_key
+            if elevenlabs_key:
+                print("🔊 Using ElevenLabs TTS")
+                audio_data = await tts_elevenlabs(response_text, elevenlabs_key)
+            else:
+                print("🔊 Using OpenAI TTS (no ElevenLabs key)")
+                audio_data = await tts_openai(response_text, settings.openai_api_key)
+            audio_base64 = base64.b64encode(audio_data).decode()
+        except Exception as e:
+            print(f"⚠️ TTS error: {e}")
+            
+        return VoiceChatResponse(
+            transcription=request,
+            response=response_text,
+            audio=audio_base64,
+            skill_used=None,
+            source="direct-code-generation"
+        )
+        
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Code generation failed: {str(e)}")
