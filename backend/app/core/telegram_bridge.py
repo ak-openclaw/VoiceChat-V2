@@ -29,7 +29,7 @@ class TelegramBridge:
     async def send_to_telegram(self, message: str, reply_to_id: Optional[str] = None) -> Dict[str, Any]:
         """Send message to Telegram via OpenClaw gateway"""
         try:
-            # Use the tools/invoke HTTP endpoint for the message tool
+            # Use the sessions_send endpoint for more reliable messaging
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
                     f"{self.gateway_url}/tools/invoke",
@@ -38,26 +38,24 @@ class TelegramBridge:
                         "Authorization": f"Bearer {self.gateway_token}",
                     },
                     json={
-                        "tool": "message",
-                        "action": "send",
+                        "tool": "sessions_send",
                         "args": {
-                            "action": "send",
+                            "sessionKey": self.session_key,
                             "message": message,
-                            "target": "telegram",  # Use Telegram channel
-                            "replyTo": reply_to_id
-                        },
-                        "sessionKey": self.session_key
+                            "timeoutSeconds": 10
+                        }
                     },
-                    timeout=10.0
+                    timeout=15.0
                 )
                 resp.raise_for_status()
                 result = resp.json()
                 return {
                     "success": True,
-                    "message_id": result.get("messageId"),
+                    "message_id": result.get("runId"),
                     "details": result
                 }
         except Exception as e:
+            print(f"Telegram send error: {e}")
             return {
                 "success": False,
                 "error": str(e)
