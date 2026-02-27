@@ -117,10 +117,57 @@ class MessageParser:
             Generated code
         """
         code = ""
+        task_lower = task.lower()
         
         # Generate simple code based on task description
         if language == "python":
-            if "add" in task.lower() and "number" in task.lower():
+            if "fibonacci" in task_lower or "fib" in task_lower:
+                code = """def fibonacci_series(n):
+    """Generate Fibonacci series up to n terms"""
+    # Initialize the first two terms
+    fib = [0, 1]
+    
+    # Check if n is valid
+    if n <= 0:
+        return []
+    elif n == 1:
+        return [0]
+    elif n == 2:
+        return fib
+    
+    # Generate the Fibonacci series
+    for i in range(2, n):
+        fib.append(fib[i-1] + fib[i-2])
+    
+    return fib
+
+def main():
+    try:
+        # Get user input for number of terms
+        n = int(input("Enter number of terms for Fibonacci series: "))
+        
+        if n <= 0:
+            print("Please enter a positive integer")
+            return
+        
+        # Generate and display the Fibonacci series
+        result = fibonacci_series(n)
+        print(f"Fibonacci series up to {n} terms:")
+        print(result)
+        
+        # Display in sequence format
+        print("Sequence:", end=" ")
+        for num in result:
+            print(num, end=" ")
+        print()
+        
+    except ValueError:
+        print("Error: Please enter a valid positive integer")
+
+if __name__ == "__main__":
+    main()
+"""
+            elif "add" in task_lower and "number" in task_lower:
                 code = """def add_numbers():
     try:
         # Get input from user
@@ -144,7 +191,7 @@ class MessageParser:
 if __name__ == "__main__":
     add_numbers()
 """
-            elif "calculator" in task.lower():
+            elif "calculator" in task_lower:
                 code = """def calculator():
     try:
         # Get input from user
