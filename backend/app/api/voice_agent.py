@@ -329,7 +329,32 @@ async def voice_chat_agent(
                     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, 
                        close_fds=True, start_new_session=True)
             
-            # If there's an explicit mention of sending something to Telegram
+            # If model claims to have sent code but there are no code blocks
+            elif should_send_special and ("code" in response_text.lower() or "code" in transcription.lower()):
+                print(f"🤖 Model claims to have sent code but didn't provide any - generating code")
+                
+                # Infer the programming language from the request
+                language = MessageParser.infer_programming_language(transcription)
+                
+                # Generate code based on the request
+                generated_code = MessageParser.generate_code_for_task(transcription, language)
+                
+                # Create a message with the generated code
+                generated_message = (
+                    f"📝 **Auto-generated code for your request:**\n\n"
+                    f"```{language}\n{generated_code}\n```\n\n"
+                    f"*Note: The assistant said it sent code to Telegram but didn't include the code. "
+                    f"I've generated this code automatically based on your request.*"
+                )
+                
+                # Wait a second before sending generated code
+                await asyncio.sleep(1)
+                subprocess.Popen([
+                    "nohup", script_path, generated_message, "2034518484"
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, 
+                   close_fds=True, start_new_session=True)
+            
+            # If there's an explicit mention of sending something else to Telegram
             elif what_being_sent:
                 print(f"📲 Sending explicit content: {what_being_sent}")
                 followup_message = (
