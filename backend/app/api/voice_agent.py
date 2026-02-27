@@ -227,74 +227,6 @@ async def voice_chat_agent(
     settings: Settings = Depends(get_settings)
 ):
     """Full voice chat pipeline"""
-    """
-    Test endpoint that directly tests code generation without going through Whisper
-    """
-    try:
-        print(f"💻 Code generation test request: {request}")
-        
-        # Infer programming language
-        language = MessageParser.infer_programming_language(request)
-        
-        # Generate code
-        code = MessageParser.generate_code_for_task(request, language)
-        
-        # Create a response
-        response_text = (
-            f"I've written a {language} program based on your request and sent it directly to your Telegram.\n\n"
-            f"The program accepts two numbers as input, adds them together, and displays the result."
-            f" It includes error handling to make sure the inputs are valid numbers."
-        )
-        
-        # Create a code message
-        code_message = (
-            f"📝 **{language.title()} Code: Addition Program**\n\n"
-            f"```{language}\n{code}\n```\n\n"
-            f"*This code was generated directly by the Voice Chat backend.*"
-        )
-        
-        # Send code to Telegram
-        script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
-                                 "telegram_notify.sh")
-        os.chmod(script_path, 0o755)
-        
-        subprocess.Popen([
-            "nohup", script_path, code_message, "2034518484"
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, 
-           close_fds=True, start_new_session=True)
-        
-        print(f"💻 Code sent directly to Telegram: {language} ({len(code)} chars)")
-        
-        # Generate TTS audio
-        audio_base64 = None
-        try:
-            elevenlabs_key = os.getenv("ELEVENLABS_API_KEY") or settings.elevenlabs_api_key
-            if elevenlabs_key:
-                print("🔊 Using ElevenLabs TTS")
-                audio_data = await tts_elevenlabs(response_text, elevenlabs_key)
-            else:
-                print("🔊 Using OpenAI TTS (no ElevenLabs key)")
-                audio_data = await tts_openai(response_text, settings.openai_api_key)
-            audio_base64 = base64.b64encode(audio_data).decode()
-        except Exception as e:
-            print(f"⚠️ TTS error: {e}")
-            
-        return VoiceChatResponse(
-            transcription=request,
-            response=response_text,
-            audio=audio_base64,
-            skill_used=None,
-            source="direct-code-generation"
-        )
-        
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Code generation failed: {str(e)}")
-
-
-"""
-Main voice chat endpoint
-"""
     try:
         # 1. Read audio
         audio_bytes = await audio.read()
@@ -379,7 +311,7 @@ Main voice chat endpoint
             response_text = await ask_openclaw(transcription)
             print(f"🤖 Agent: {response_text[:80]}...")
 
-        # 5. TTS — ElevenLabs preferred, OpenAI fallback
+        # 4. TTS — ElevenLabs preferred, OpenAI fallback
         audio_base64 = None
         try:
             elevenlabs_key = os.getenv("ELEVENLABS_API_KEY") or settings.elevenlabs_api_key
@@ -392,9 +324,8 @@ Main voice chat endpoint
             audio_base64 = base64.b64encode(audio_data).decode()
         except Exception as e:
             print(f"⚠️ TTS error: {e}")
-            raise HTTPException(status_code=500, detail=f"TTS failed: {str(e)}")
             
-        # Send response to Telegram using external script (maximum reliability)
+        # 5. Send response to Telegram using external script (maximum reliability)
         try:
             # Standard formatted message (conversation)
             formatted_message = (
@@ -496,7 +427,7 @@ Main voice chat endpoint
             response=response_text,
             audio=audio_base64,
             skill_used=None,
-            source="openclaw-gateway" if not is_weather else "direct-weather"
+            source="openclaw-gateway" if not (is_weather or is_code_request) else "direct-handler"
         )
         
     except HTTPException:
@@ -529,6 +460,7 @@ async def telegram_history(limit: int = 10):
             "error": str(e)
         }
 
+
 @router.post("/send-to-telegram")
 async def send_to_telegram(message: str = Form(...)):
     """Send a message to Telegram from voice chat (using bridge)"""
@@ -550,30 +482,16 @@ async def send_to_telegram(message: str = Form(...)):
             "error": str(e)
         }
         
+        
 @router.post("/telegram-direct")
 async def telegram_direct(request: TelegramDirectMessage):
-    """Send a message directly to Telegram (tries all available methods)"""
+    """Send a message directly to Telegram using webhook gateway"""
     try:
-        # Try CLI first (most reliable)
-        cli = get_telegram_cli()
-        result = await cli.send_message(
+        gateway = await get_telegram_gateway()
+        result = await gateway.send_to_telegram(
             message=request.message,
             chat_id=request.chat_id
         )
-        
-        # If CLI fails, try gateway
-        if not result.get("success"):
-            gateway = await get_telegram_gateway()
-            result = await gateway.send_to_telegram(
-                message=request.message,
-                chat_id=request.chat_id
-            )
-            
-            # If gateway fails, try bridge
-            if not result.get("success"):
-                telegram = await get_telegram_bridge()
-                result = await telegram.send_to_telegram(request.message)
-            
         return result
     except Exception as e:
         traceback.print_exc()
@@ -581,6 +499,7 @@ async def telegram_direct(request: TelegramDirectMessage):
             "success": False,
             "error": str(e)
         }
+
 
 @router.get("/agent-status")
 async def agent_status():
