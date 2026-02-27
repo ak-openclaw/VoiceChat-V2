@@ -35,7 +35,8 @@ def main():
     
     # Set mock transcription in backend logs (for debugging)
     # This simulates the Whisper API returning this text
-    os.environ["MOCK_TRANSCRIPTION"] = "What's the weather in Pune?"
+    if "MOCK_TRANSCRIPTION" not in os.environ:
+        os.environ["MOCK_TRANSCRIPTION"] = "What's the weather in Pune?"
     
     # Send request
     print(f"Sending request to {url}...")
