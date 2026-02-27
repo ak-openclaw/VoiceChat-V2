@@ -290,13 +290,11 @@ async def voice_chat_agent(
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Code generation failed: {str(e)}")
-    """
-    Full pipeline:
-    Browser audio → Whisper (STT) → OpenClaw Agent → ElevenLabs (TTS) → Browser
 
-    Uses the REAL OpenClaw agent via gateway HTTP API with the same
-    session key as Telegram — full skills, memory, tools available.
-    """
+
+"""
+Main voice chat endpoint
+"""
     try:
         # 1. Read audio
         audio_bytes = await audio.read()
