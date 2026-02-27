@@ -10,8 +10,9 @@ import os
 import httpx
 import io
 import subprocess
+import re
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Body
-from typing import Optional
+from typing import Optional, List, Tuple
 import traceback
 
 from app.config import get_settings, Settings
@@ -19,6 +20,7 @@ from app.models import VoiceChatResponse, TelegramDirectMessage
 from app.core.telegram_bridge import get_telegram_bridge
 from app.core.telegram_gateway import get_telegram_gateway
 from app.core.telegram_cli import get_telegram_cli
+from app.core.message_parser import MessageParser
 
 router = APIRouter()
 
@@ -285,6 +287,7 @@ async def voice_chat_agent(
             
         # Send response to Telegram using external script (maximum reliability)
         try:
+            # Standard formatted message (conversation)
             formatted_message = (
                 f"🎙️ **Voice Message**\n\n"
                 f"📝 *You said:* \"{transcription}\"\n\n"
@@ -294,8 +297,12 @@ async def voice_chat_agent(
             if audio_base64:
                 formatted_message += "\n\n🔊 *Audio response played in voice chat*"
                 
-            # Use completely independent shell script - most reliable approach
-            # This runs in a separate process and will complete even if the backend crashes
+            # Check for special content like code blocks or explicit send requests
+            should_send_special = MessageParser.should_send_separately(response_text)
+            code_blocks = MessageParser.extract_code_blocks(response_text)
+            what_being_sent = MessageParser.extract_sending_context(response_text)
+            
+            # Send standard message first
             script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
                                      "telegram_notify.sh")
             
@@ -303,13 +310,39 @@ async def voice_chat_agent(
             os.chmod(script_path, 0o755)
             
             # Launch the script as a completely separate process
-            # This will continue running even if the backend process crashes
             subprocess.Popen([
                 "nohup", script_path, formatted_message, "2034518484"
             ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, 
                close_fds=True, start_new_session=True)
             
-            print(f"📱 Telegram notification sent via independent script")
+            print(f"📱 Standard notification sent via script")
+            
+            # If there are code blocks, send them as a separate message
+            if code_blocks:
+                code_message = MessageParser.prepare_code_message(code_blocks)
+                if code_message:
+                    print(f"📟 Sending code blocks separately")
+                    # Wait a second before sending code block
+                    await asyncio.sleep(1)
+                    subprocess.Popen([
+                        "nohup", script_path, code_message, "2034518484"
+                    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, 
+                       close_fds=True, start_new_session=True)
+            
+            # If there's an explicit mention of sending something to Telegram
+            elif what_being_sent:
+                print(f"📲 Sending explicit content: {what_being_sent}")
+                followup_message = (
+                    f"🔍 **Note:** The assistant mentioned sending '{what_being_sent}' to Telegram.\n\n"
+                    f"While I've forwarded the conversation to Telegram, I don't see any separate content "
+                    f"that was meant to be sent directly. The assistant might be confused about its capabilities."
+                )
+                # Wait a second before sending clarification
+                await asyncio.sleep(1)
+                subprocess.Popen([
+                    "nohup", script_path, followup_message, "2034518484"
+                ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, 
+                   close_fds=True, start_new_session=True)
             
         except Exception as e:
             print(f"⚠️ Telegram script error: {e}")
