@@ -576,16 +576,35 @@ async def test_code_generation(
         # Generate code
         code = MessageParser.generate_code_for_task(request, language)
         
-        # Create a response
-        response_text = (
-            f"I've written a {language} program based on your request and sent it directly to your Telegram.\n\n"
-            f"The program accepts two numbers as input, adds them together, and displays the result."
-            f" It includes error handling to make sure the inputs are valid numbers."
-        )
+        # Create a response based on request
+        response_text = ""
+        if "fibonacci" in request.lower() or "fib" in request.lower():
+            response_text = (
+                f"I've written a {language} program for generating Fibonacci series and sent it to your Telegram.\n\n"
+                f"The program asks for the number of terms and generates the Fibonacci sequence."
+                f" It includes error handling for invalid inputs and displays the result as both a list and a sequence."
+            )
+        elif "add" in request.lower() and "number" in request.lower():
+            response_text = (
+                f"I've written a {language} program based on your request and sent it directly to your Telegram.\n\n"
+                f"The program accepts two numbers as input, adds them together, and displays the result."
+                f" It includes error handling to make sure the inputs are valid numbers."
+            )
+        else:
+            response_text = (
+                f"I've written a {language} program based on your request and sent it directly to your Telegram.\n\n"
+                f"The program demonstrates basic {language} functionality and includes comments to explain the code."
+            )
         
-        # Create a code message
+        # Create a code block message to send separately
+        title = "Addition Program"
+        if "fibonacci" in request.lower() or "fib" in request.lower():
+            title = "Fibonacci Series Generator"
+        elif not ("add" in request.lower() and "number" in request.lower()):
+            title = "Custom Program"
+            
         code_message = (
-            f"📝 **{language.title()} Code: Addition Program**\n\n"
+            f"📝 **{language.title()} Code: {title}**\n\n"
             f"```{language}\n{code}\n```\n\n"
             f"*This code was generated directly by the Voice Chat backend.*"
         )
