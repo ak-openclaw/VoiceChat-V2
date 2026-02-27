@@ -29,30 +29,35 @@ class TelegramBridge:
     async def send_to_telegram(self, message: str, reply_to_id: Optional[str] = None) -> Dict[str, Any]:
         """Send message to Telegram via OpenClaw gateway"""
         try:
-            # Use the sessions_send endpoint for more reliable messaging
+            # Use the chat completions API with a system message to send to Telegram
+            telegram_instruction = (
+                f"[SYSTEM] Send this exact message to Telegram:\n\n{message}\n\n"
+                f"After sending it to Telegram, respond ONLY with: TELEGRAM_SENT"
+            )
+            
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
-                    f"{self.gateway_url}/tools/invoke",
+                    f"{self.gateway_url}/v1/chat/completions",
                     headers={
                         "Content-Type": "application/json",
                         "Authorization": f"Bearer {self.gateway_token}",
+                        "x-openclaw-session-key": self.session_key
                     },
                     json={
-                        "tool": "sessions_send",
-                        "args": {
-                            "sessionKey": self.session_key,
-                            "message": message,
-                            "timeoutSeconds": 10
-                        }
+                        "messages": [{"role": "user", "content": telegram_instruction}],
+                        "max_tokens": 50
                     },
                     timeout=15.0
                 )
                 resp.raise_for_status()
-                result = resp.json()
+                data = resp.json()
+                response = data["choices"][0]["message"]["content"]
+                success = "TELEGRAM_SENT" in response
+                
                 return {
-                    "success": True,
-                    "message_id": result.get("runId"),
-                    "details": result
+                    "success": success,
+                    "message_id": "chat-message",
+                    "response": response
                 }
         except Exception as e:
             print(f"Telegram send error: {e}")
@@ -62,40 +67,51 @@ class TelegramBridge:
             }
     
     async def get_recent_messages(self, limit: int = 10) -> List[Dict[str, Any]]:
-        """Get recent messages from Telegram session history"""
+        """Get recent messages from Telegram session history using shared session"""
         try:
-            # Use sessions_history tool to get recent messages
+            # Ask the LLM to summarize recent conversation context
+            history_request = (
+                f"[SYSTEM] Provide a brief summary of our recent conversation history. "
+                f"Include the last {limit} exchanges if possible. Format as a JSON array "
+                f"with objects containing 'role' and 'content' fields. "
+                f"Use only 'user' and 'assistant' roles."
+            )
+            
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
-                    f"{self.gateway_url}/tools/invoke",
+                    f"{self.gateway_url}/v1/chat/completions",
                     headers={
                         "Content-Type": "application/json",
                         "Authorization": f"Bearer {self.gateway_token}",
+                        "x-openclaw-session-key": self.session_key
                     },
                     json={
-                        "tool": "sessions_history",
-                        "args": {
-                            "sessionKey": self.session_key,
-                            "limit": limit,
-                            "includeTools": False
-                        }
+                        "messages": [{"role": "user", "content": history_request}],
+                        "max_tokens": 500
                     },
                     timeout=10.0
                 )
                 resp.raise_for_status()
-                result = resp.json()
+                data = resp.json()
+                summary = data["choices"][0]["message"]["content"]
                 
-                # Extract messages from history
-                messages = []
-                if "messages" in result:
-                    for msg in result["messages"]:
-                        messages.append({
-                            "role": msg.get("role", "unknown"),
-                            "content": msg.get("content", ""),
-                            "id": msg.get("id", ""),
-                            "timestamp": msg.get("timestamp")
-                        })
-                return messages
+                # Try to extract JSON array from response
+                import re
+                import json
+                
+                json_match = re.search(r'(\[.*?\])', summary, re.DOTALL)
+                if json_match:
+                    try:
+                        messages_json = json_match.group(1)
+                        messages = json.loads(messages_json)
+                        return messages
+                    except json.JSONDecodeError:
+                        # Fallback: return the summary as a single message
+                        return [{"role": "system", "content": summary}]
+                else:
+                    # No JSON found, return summary as text
+                    return [{"role": "system", "content": summary}]
+                        
         except Exception as e:
             print(f"Error getting history: {e}")
             return []
