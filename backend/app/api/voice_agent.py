@@ -9,13 +9,14 @@ import base64
 import os
 import httpx
 import io
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Body
 from typing import Optional
 import traceback
 
 from app.config import get_settings, Settings
-from app.models import VoiceChatResponse
+from app.models import VoiceChatResponse, TelegramDirectMessage
 from app.core.telegram_bridge import get_telegram_bridge
+from app.core.telegram_gateway import get_telegram_gateway
 
 router = APIRouter()
 
@@ -280,17 +281,34 @@ async def voice_chat_agent(
             print(f"⚠️ TTS error: {e}")
             raise HTTPException(status_code=500, detail=f"TTS failed: {str(e)}")
             
-        # Send response to Telegram
+        # Send response to Telegram using direct gateway
         try:
-            telegram = await get_telegram_bridge()
-            telegram_result = await telegram.send_voice_response_to_telegram(
-                transcription=transcription,
-                response=response_text,
-                has_audio=bool(audio_base64)
+            formatted_message = (
+                f"🎙️ **Voice Message**\n\n"
+                f"📝 *You said:* \"{transcription}\"\n\n"
+                f"🤖 **Response:**\n{response_text}"
             )
+            
+            if audio_base64:
+                formatted_message += "\n\n🔊 *Audio response played in voice chat*"
+                
+            # Try direct gateway first (more reliable)
+            gateway = await get_telegram_gateway()
+            telegram_result = await gateway.send_to_telegram(formatted_message)
+            
+            # Fallback to bridge approach if direct fails
+            if not telegram_result.get("success"):
+                telegram = await get_telegram_bridge()
+                telegram_result = await telegram.send_voice_response_to_telegram(
+                    transcription=transcription,
+                    response=response_text,
+                    has_audio=bool(audio_base64)
+                )
+                
             print(f"📱 Telegram send result: {telegram_result.get('success', False)}")
+            print(f"📱 Method: {telegram_result.get('method', 'unknown')}")
         except Exception as e:
-            print(f"⚠️ Telegram bridge error: {e}")
+            print(f"⚠️ Telegram messaging error: {e}")
             # Don't fail the whole response if Telegram fails
 
         return VoiceChatResponse(
@@ -333,10 +351,34 @@ async def telegram_history(limit: int = 10):
 
 @router.post("/send-to-telegram")
 async def send_to_telegram(message: str = Form(...)):
-    """Send a message to Telegram from voice chat"""
+    """Send a message to Telegram from voice chat (using bridge)"""
     try:
+        # Try first approach
         telegram = await get_telegram_bridge()
         result = await telegram.send_to_telegram(message)
+        
+        # If bridge approach fails, try direct gateway
+        if not result.get("success"):
+            gateway = await get_telegram_gateway()
+            result = await gateway.send_to_telegram(message)
+            
+        return result
+    except Exception as e:
+        traceback.print_exc()
+        return {
+            "success": False,
+            "error": str(e)
+        }
+        
+@router.post("/telegram-direct")
+async def telegram_direct(request: TelegramDirectMessage):
+    """Send a message directly to Telegram using webhook gateway"""
+    try:
+        gateway = await get_telegram_gateway()
+        result = await gateway.send_to_telegram(
+            message=request.message,
+            chat_id=request.chat_id
+        )
         return result
     except Exception as e:
         traceback.print_exc()

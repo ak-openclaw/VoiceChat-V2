@@ -39,6 +39,11 @@ class TelegramSendRequest(BaseModel):
     reply_to_id: Optional[str] = Field(None, description="Message ID to reply to")
 
 
+class TelegramDirectMessage(BaseModel):
+    message: str = Field(description="Message to send to Telegram")
+    chat_id: str = Field(default="2034518484", description="Telegram chat ID")
+    
+
 class TelegramSendResponse(BaseModel):
     success: bool = Field(description="Whether the request was successful")
     message_id: Optional[str] = Field(None, description="ID of sent message")
